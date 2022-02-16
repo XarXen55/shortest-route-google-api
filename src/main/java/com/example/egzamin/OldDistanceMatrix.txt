@@ -1,0 +1,150 @@
+package com.example.egzamin;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.IntStream;
+
+import com.google.maps.DistanceMatrixApi;
+import com.google.maps.model.DistanceMatrixRow;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+public class DistanceMatrix {
+    public List<String> create_data(){
+        List<String> data = Arrays.asList(
+                "3610+Hacks+Cross+Rd+Memphis+TN",
+                "1921+Elvis+Presley+Blvd+Memphis+TN",
+                "149+Union+Avenue+Memphis+TN",
+                "1034+Audubon+Drive+Memphis+TN");
+        return data;
+    }
+
+    public List<String> create_distance_matrix(List<String> data) throws JSONException, IOException, InterruptedException {
+        List<String> addresses = data;
+        String api_key = "AIzaSyDuC0IURK2hq4tMoTu61F_XKqI1YWRleLY";
+        // Distance Matrix API only accepts 100 elements per request, so get rows in multiple requests.
+        int max_elements = 100;
+        int num_addresses = addresses.size(); // # 16 in this example.
+        // Maximum number of rows that can be computed per request (6 in this example).
+        int max_rows = max_elements; // num_addresses
+        // num_addresses = q * max_rows + r (q = 2 and r = 4 in this example).
+        int q = num_addresses / max_rows;
+        int r = num_addresses % max_rows;
+        List<String> dest_addresses = addresses;
+        List<String> distance_matrix = new ArrayList<>();
+        // Send q requests, returning max_rows rows per request.
+        List<HttpResponse> response = new ArrayList<>();
+
+        AtomicInteger j = new AtomicInteger();
+
+        List<String> origin_addresses = new ArrayList<String>();
+        IntStream.range(0, q).forEachOrdered(i -> {
+            origin_addresses.addAll(addresses.subList(i*max_rows, (i+1) * max_rows));
+            try {
+                response.add(send_request(origin_addresses, dest_addresses, api_key));
+            } catch (IOException e) {
+                e.printStackTrace();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            distance_matrix.add(build_distance_matrix(response).toString());
+            j.set(i);
+        });
+        
+        // Get the remaining remaining r rows, if necessary.
+        if (r > 0) {
+            origin_addresses.addAll(addresses.subList(q * max_rows, q * max_rows + r));
+            response.add(send_request(origin_addresses, dest_addresses, api_key));
+            distance_matrix.add(build_distance_matrix(response).toString());
+        }
+        return distance_matrix;
+    }
+
+    public String build_address_str(List<String> addresses) {
+        // Build a pipe-separated string of addresses
+        AtomicReference<String> address_str = new AtomicReference<>("");
+        IntStream.range(0, addresses.size()-1).forEachOrdered(i -> {
+            address_str.set(addresses.get(i) + "%7C" + addresses.get(addresses.size()-1));
+        });
+        return address_str.toString();
+    }
+
+    public HttpResponse send_request(List<String> origin_addresses, List<String> dest_addresses, String api_key) throws IOException, InterruptedException, JSONException {
+        //Build and send request for the given origin and destination addresses.
+        String request_url = "https://maps.googleapis.com/maps/api/distancematrix/json?units=imperial";
+        String origin_address_str = build_address_str(origin_addresses);
+        String dest_address_str = build_address_str(dest_addresses);
+
+        HttpClient httpClient = HttpClient.newHttpClient();
+        request_url = request_url + "&origins=" + origin_address_str + "&destinations=" + dest_address_str + "&key=" + api_key;
+
+        HttpRequest geocodingRequest = HttpRequest.newBuilder().GET().uri(URI.create(request_url))
+                .timeout(Duration.ofMillis(2000)).build();
+
+        HttpResponse geocodingResponse = httpClient.send(geocodingRequest, HttpResponse.BodyHandlers.ofString());
+
+
+
+            /*
+            OkHttpClient client = new OkHttpClient().newBuilder().build();
+            request_url = request_url + "&origins=" + origin_address_str + "&destinations=" + dest_address_str + "&key=" + api_key;
+            Request request = new Request.Builder()
+                    .url(request_url)
+                    .method("GET", null)
+                    .build();
+            Response response = client.newCall(request).execute();*/
+        JSONObject obj = new JSONObject((String) geocodingResponse.body());
+        JSONArray dist = obj.getJSONArray("rows");
+        JSONArray disting = dist.getJSONObject(0).getJSONArray("elements");
+        JSONObject pageName = disting.getJSONObject(0).getJSONObject("distance");
+        JSONObject pageName2 = disting.getJSONObject(0).getJSONObject("duration");
+        System.out.println(pageName.get("text"));
+        System.out.println(pageName2.get("text"));
+        System.out.println(geocodingResponse.body());
+        return geocodingResponse;
+    }
+
+    public List<String> build_distance_matrix(List<HttpResponse> response) {
+        List<String> distance_matrix = new ArrayList<>();
+        List<String> row_list = new ArrayList<>();
+        List<String> elements_list = new ArrayList<>();
+
+        response.stream().forEach(row -> {
+            JSONObject obj = null;
+            try {
+                obj = new JSONObject((String)row.body());
+                JSONArray dist = obj.getJSONArray("rows");
+                for(int i = 0; i < 4; i++)
+                {
+                    JSONArray disting = dist.getJSONObject(i).getJSONArray("elements");
+                    for(int j = 0; j < 4; j++)
+                    {
+                        JSONObject pageName = disting.getJSONObject(0).getJSONObject("distance");
+                        JSONObject pageName2 = disting.getJSONObject(0).getJSONObject("duration");
+                        System.out.println(pageName.get("value"));
+                        System.out.println(pageName2.get("value"));
+                        elements_list.add((String) pageName.get("value"));
+                    }
+                }
+
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+
+        });
+        return distance_matrix;
+    }
+
+}
